@@ -24,16 +24,12 @@ Postgres 17 and ZFS tools are inside the container, the storage pool is
 created automatically as a plain file (no spare disk or partition needed), and
 the permission setup happens for you — no `sudo` commands to copy around.
 Going native means installing and configuring those pieces yourself (that's
-what `argon doctor` walks you through). With Docker, the only thing your
-machine needs is the ZFS kernel module; everything else is in the box.
+what `argon doctor` walks you through). With Docker, everything is in the
+box: ZFS is used if your kernel has it, and if not (stock WSL2 / Docker
+Desktop), the container falls back to a file-backed **Btrfs** volume
+automatically — no setup either way.
 
-1. **Check the one host requirement** — the ZFS kernel module (Linux):
-
-   ```bash
-   lsmod | grep zfs || sudo apt install zfsutils-linux   # Ubuntu/Debian
-   ```
-
-2. **Install and start Argon:**
+1. **Install and start Argon:**
 
    ```bash
    curl -fsSL https://raw.githubusercontent.com/masaok/argon/main/install.sh | sh
@@ -41,16 +37,14 @@ machine needs is the ZFS kernel module; everything else is in the box.
    docker compose up -d
    ```
 
-3. **Open the dashboard** at http://localhost:3000 — the `main` branch is
+2. **Open the dashboard** at http://localhost:3000 — the `main` branch is
    bootstrapped automatically on first run.
 
-4. **Create a branch and connect** (branches listen on ports 5433–5443):
+3. **Create a branch and connect** (branches listen on ports 5433–5443):
 
    ```bash
    psql "postgresql://postgres@127.0.0.1:5434/postgres"
    ```
-
-macOS/Windows: Docker Desktop's Linux VM must have ZFS available.
 
 ### Path B — Native (pnpm, no Docker)
 
@@ -92,6 +86,37 @@ macOS/Windows: Docker Desktop's Linux VM must have ZFS available.
    argon connect feat-x
    ```
 
+### WSL2 / Docker Desktop users
+
+The standard WSL2 kernel (and therefore Docker Desktop, which shares it)
+ships **without the ZFS module** — but the kernel does include **Btrfs**, and
+Argon falls back to it automatically. Both quickstart paths work:
+
+- **Docker (nothing to do):** `docker compose up -d` just works — the
+  entrypoint detects the missing ZFS module and creates a file-backed Btrfs
+  volume inside the container instead.
+
+- **Native in WSL2:** set up a file-backed Btrfs volume once, then run as
+  usual (`argon doctor` prints these same steps):
+
+  ```bash
+  sudo apt install btrfs-progs
+  sudo truncate -s 20G /var/lib/argon-btrfs.img
+  sudo mkfs.btrfs /var/lib/argon-btrfs.img
+  mkdir -p ~/.argon/branches
+  sudo mount -o loop,user_subvol_rm_allowed /var/lib/argon-btrfs.img ~/.argon/branches
+  sudo chown $USER ~/.argon/branches
+  argon up
+  ```
+
+  `user_subvol_rm_allowed` lets Argon delete branches without root. The mount
+  doesn't survive a WSL restart — add it to `/etc/fstab` (see `argon doctor`)
+  or re-run the `mount` line.
+
+Prefer real ZFS on WSL2 anyway? It requires building a custom WSL2 kernel —
+possible, but it defeats the "easy install" goal; the Btrfs backend is the
+supported path.
+
 `argon doctor` turns host problems into copy-pasteable fixes:
 
 ```
@@ -129,7 +154,10 @@ Next.js UI (:3000)  ──▶  argond (127.0.0.1:5310)  ──▶  zfs snapshot/
 ```
 
 - **Branch create** = `zfs snapshot parent@x` + `zfs clone` (both O(1)) +
-  `pg_ctl start` on a free port from 5433–5533.
+  `pg_ctl start` on a free port from 5433–5533. On the Btrfs backend it's a
+  single `btrfs subvolume snapshot` (also O(1), writable in one step).
+- **Storage backends**: `ARGON_STORAGE=auto` (default) prefers ZFS and falls
+  back to Btrfs; force one with `zfs`/`btrfs`.
 - **Scale-to-zero**: a supervisor sweeps every 15s; a branch with zero client
   connections for 5 minutes is stopped (`ARGON_NO_SUSPEND=1` disables this).
   Restart is explicit in v1 — wake-on-connect proxying is planned for v2.
@@ -138,8 +166,9 @@ Next.js UI (:3000)  ──▶  argond (127.0.0.1:5310)  ──▶  zfs snapshot/
 
 ## Honest constraints (read before filing issues)
 
-- **Linux for real ZFS.** macOS/Windows go through Docker. There is no
-  Btrfs/overlayfs fallback yet.
+- **Linux only (ZFS or Btrfs).** ZFS is preferred; hosts without the ZFS
+  kernel module (stock WSL2, Docker Desktop) use the Btrfs fallback
+  automatically. macOS/Windows go through Docker. No overlayfs mode.
 - **Privileges.** ZFS operations need either `privileged: true` (Docker path)
   or one-time `sudo zfs allow` delegation (native path). Never run the web UI
   or daemon as root — `initdb` will refuse anyway.
@@ -166,7 +195,8 @@ pnpm setup       # install + build daemon/cli
 pnpm dev         # daemon (tsx watch) + web (next dev) together
 ```
 
-Environment knobs (daemon): `ARGON_DATASET`, `ARGON_STATE_DIR`,
+Environment knobs (daemon): `ARGON_STORAGE` (auto|zfs|btrfs),
+`ARGON_DATASET` (zfs), `ARGON_BTRFS_ROOT` (btrfs), `ARGON_STATE_DIR`,
 `ARGON_PG_BIN`, `ARGON_DAEMON_PORT`, `ARGON_PORT_START/END`,
 `ARGON_IDLE_TIMEOUT_MS`, `ARGON_NO_SUSPEND`.
 

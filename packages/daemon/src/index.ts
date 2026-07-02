@@ -5,18 +5,20 @@ import { openDb } from "./db.js";
 import { ensureMain, reconcile } from "./branches.js";
 import { startApi } from "./api.js";
 import { startSupervisor, stopSupervisor } from "./supervisor.js";
-import { zfsAvailable } from "./storage.js";
+import { initStorage } from "./storage.js";
 
 async function main(): Promise<void> {
   mkdirSync(config.stateDir, { recursive: true });
   openDb();
 
-  if (!(await zfsAvailable())) {
-    console.error(
-      "[argond] `zfs` not found. Install ZFS (see `argon doctor`) or run via Docker.",
-    );
+  let backendName: string;
+  try {
+    backendName = (await initStorage()).name;
+  } catch (err) {
+    console.error(`[argond] ${err instanceof Error ? err.message : err}`);
     process.exit(1);
   }
+  console.log(`[argond] storage backend: ${backendName}`);
 
   await reconcile();
 
@@ -24,8 +26,7 @@ async function main(): Promise<void> {
     await ensureMain();
   } catch (err) {
     console.error(
-      "[argond] could not bootstrap the main branch. Is the base dataset " +
-        `"${config.baseDataset}" created and delegated to this user? Run \`argon doctor\`.`,
+      "[argond] could not bootstrap the main branch — run `argon doctor` for setup instructions.",
     );
     throw err;
   }

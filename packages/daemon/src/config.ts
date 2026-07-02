@@ -9,18 +9,26 @@ function envInt(name: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+const stateDir = process.env.ARGON_STATE_DIR || join(homedir(), ".argon");
+
 export const config = {
-  /** Base ZFS dataset under which every branch lives, e.g. "argon" or "tank/argon". */
-  baseDataset: process.env.ARGON_DATASET ?? "argon",
+  /** Storage backend: "auto" prefers ZFS, falls back to Btrfs. */
+  storage: (process.env.ARGON_STORAGE || "auto") as "auto" | "zfs" | "btrfs",
+
+  /** ZFS: base dataset under which every branch lives, e.g. "argon" or "tank/argon". */
+  baseDataset: process.env.ARGON_DATASET || "argon",
+
+  /** Btrfs: directory (on a btrfs filesystem) holding branch subvolumes. */
+  btrfsRoot: process.env.ARGON_BTRFS_ROOT || join(stateDir, "branches"),
 
   /** Where the daemon keeps its own state (SQLite db, logs). */
-  stateDir: process.env.ARGON_STATE_DIR ?? join(homedir(), ".argon"),
+  stateDir,
 
   /** Directory containing initdb/pg_ctl/psql. Empty string = rely on $PATH. */
-  pgBinDir: process.env.ARGON_PG_BIN ?? "",
+  pgBinDir: process.env.ARGON_PG_BIN || "",
 
   /** Superuser name used for every cluster (local trust auth in v1). */
-  pgUser: process.env.ARGON_PG_USER ?? "postgres",
+  pgUser: process.env.ARGON_PG_USER || "postgres",
 
   apiHost: "127.0.0.1",
   apiPort: envInt("ARGON_DAEMON_PORT", DEFAULT_DAEMON_PORT),

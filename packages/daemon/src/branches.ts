@@ -3,20 +3,16 @@ import { rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Branch, BranchInfo, CreateBranchRequest } from "@argon/shared";
 import { MAIN_BRANCH, isValidBranchName } from "@argon/shared";
-import { branchLogPath, config } from "./config.js";
+import { branchLogPath } from "./config.js";
 import * as db from "./db.js";
 import * as pg from "./postgres.js";
-import * as storage from "./storage.js";
+import { getBackend } from "./storage.js";
 import { allocatePort } from "./ports.js";
 
 export class BranchError extends Error {
   constructor(message: string, public statusCode = 400) {
     super(message);
   }
-}
-
-function branchDataset(name: string): string {
-  return `${config.baseDataset}/${name}`;
 }
 
 export function toInfo(branch: Branch): BranchInfo {
@@ -32,18 +28,19 @@ export function toInfo(branch: Branch): BranchInfo {
 }
 
 /**
- * First-boot bootstrap: create the base dataset, the "main" branch dataset,
- * run initdb, and record it. Idempotent.
+ * First-boot bootstrap: create the base dataset/subvolume for "main", run
+ * initdb, and record it. Idempotent.
  */
 export async function ensureMain(): Promise<Branch> {
   const existing = db.getBranchByName(MAIN_BRANCH);
   if (existing) return existing;
 
-  const dataset = branchDataset(MAIN_BRANCH);
-  if (!(await storage.datasetExists(dataset))) {
-    await storage.createDataset(dataset);
+  const storage = getBackend();
+  const locator = storage.branchLocator(MAIN_BRANCH);
+  if (!(await storage.exists(locator))) {
+    await storage.createBase(locator);
   }
-  const mountpoint = await storage.getMountpoint(dataset);
+  const mountpoint = await storage.getMountpoint(locator);
   const dataDir = pg.pgDataDir(mountpoint);
   if (!existsSync(join(dataDir, "PG_VERSION"))) {
     await pg.initCluster(dataDir);
@@ -53,7 +50,7 @@ export async function ensureMain(): Promise<Branch> {
     id: nanoid(10),
     name: MAIN_BRANCH,
     parentId: null,
-    dataset,
+    dataset: locator,
     snapshot: null,
     port: null,
     status: "stopped",
@@ -79,16 +76,16 @@ export async function createBranch(req: CreateBranchRequest): Promise<BranchInfo
     throw new BranchError(`parent branch "${from}" not found`, 404);
   }
 
+  const storage = getBackend();
   const id = nanoid(10);
-  const snap = await storage.snapshot(parent.dataset, `argon-${id}`);
-  const dataset = branchDataset(name);
-  await storage.clone(snap, dataset);
+  const locator = storage.branchLocator(name);
+  const snap = await storage.cloneFrom(parent.dataset, `argon-${id}`, locator);
 
   const branch: Branch = {
     id,
     name,
     parentId: parent.id,
-    dataset,
+    dataset: locator,
     snapshot: snap,
     port: null,
     status: "stopped",
@@ -107,7 +104,7 @@ export async function startBranch(id: string): Promise<Branch> {
   if (!branch) throw new BranchError("branch not found", 404);
   if (branch.status === "running") return branch;
 
-  const mountpoint = await storage.getMountpoint(branch.dataset);
+  const mountpoint = await getBackend().getMountpoint(branch.dataset);
   const dataDir = pg.pgDataDir(mountpoint);
 
   // A fresh clone carries the parent's postmaster.pid; remove it if that
@@ -134,7 +131,7 @@ export async function stopBranch(id: string): Promise<Branch> {
   if (!branch) throw new BranchError("branch not found", 404);
   if (branch.status !== "running" && branch.status !== "starting") return branch;
 
-  const mountpoint = await storage.getMountpoint(branch.dataset);
+  const mountpoint = await getBackend().getMountpoint(branch.dataset);
   const dataDir = pg.pgDataDir(mountpoint);
   if (await pg.isAlive(dataDir)) {
     await pg.stop(dataDir);
@@ -157,8 +154,9 @@ export async function deleteBranch(id: string): Promise<void> {
     );
   }
 
+  const storage = getBackend();
   await stopBranch(id);
-  await storage.destroyDataset(branch.dataset);
+  await storage.destroyBranch(branch.dataset);
   if (branch.snapshot) {
     // Origin snapshot lives on the parent; harmless to keep, tidy to remove.
     try {
@@ -178,7 +176,7 @@ export async function reconcile(): Promise<void> {
   for (const branch of db.listBranches()) {
     if (branch.status === "stopped") continue;
     try {
-      const mountpoint = await storage.getMountpoint(branch.dataset);
+      const mountpoint = await getBackend().getMountpoint(branch.dataset);
       const alive = await pg.isAlive(pg.pgDataDir(mountpoint));
       if (alive && branch.port !== null) {
         db.updateBranchStatus(branch.id, "running", branch.port);
