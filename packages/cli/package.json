@@ -1,0 +1,29 @@
+{
+  "name": "argon",
+  "version": "0.1.0",
+  "description": "Instant Postgres branching on a single machine (Neon-lite)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "argon": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@argon/daemon": "workspace:*",
+    "@argon/shared": "workspace:*",
+    "commander": "^13.1.0",
+    "execa": "^9.5.2",
+    "picocolors": "^1.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  argon:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ghcr.io/masaok/argon:latest
+    privileged: true # required for zpool create / zfs mounts
+    ports:
+      - "3000:3000" # Next.js UI
+      - "5433-5443:5433-5443" # branch Postgres ports
+    volumes:
+      - argon-data:/var/lib/argon
+
+volumes:
+  argon-data:

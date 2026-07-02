@@ -1,0 +1,17 @@
+{
+  "name": "argon-monorepo",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm --filter @argon/shared build && pnpm --filter @argon/daemon build && pnpm --filter argon build && pnpm --filter @argon/web build",
+    "dev": "pnpm --filter @argon/shared build && concurrently -n daemon,web -c blue,green \"pnpm --filter @argon/daemon dev\" \"pnpm --filter @argon/web dev\"",
+    "setup": "pnpm install && pnpm --filter @argon/shared build && pnpm --filter @argon/daemon build && pnpm --filter argon build",
+    "doctor": "pnpm --filter argon exec argon doctor"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
