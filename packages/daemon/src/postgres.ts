@@ -1,6 +1,6 @@
 import { execa } from "execa";
 import { join } from "node:path";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, appendFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "./config.js";
 
@@ -18,13 +18,20 @@ export function pgDataDir(mountpoint: string): string {
 }
 
 export async function initCluster(dataDir: string): Promise<void> {
-  // trust auth on loopback: v1 is a local single-user dev tool
+  // trust auth: v1 is a local single-user dev tool
   await execa(pgBin("initdb"), [
     "-D", dataDir,
     "-U", config.pgUser,
     "--auth=trust",
     "--no-instructions",
   ]);
+  // Branches listen on 0.0.0.0 so the published container ports are reachable
+  // from the host; extend trust past the default loopback-only rules to cover
+  // connections arriving via Docker's gateway. Clones inherit this pg_hba.conf.
+  appendFileSync(
+    join(dataDir, "pg_hba.conf"),
+    "host all all 0.0.0.0/0 trust\nhost all all ::0/0 trust\n",
+  );
 }
 
 export async function start(dataDir: string, port: number, logFile: string): Promise<void> {
@@ -32,7 +39,7 @@ export async function start(dataDir: string, port: number, logFile: string): Pro
   await execa(pgBin("pg_ctl"), [
     "-D", dataDir,
     "-l", logFile,
-    "-o", `-p ${port} -c listen_addresses=127.0.0.1`,
+    "-o", `-p ${port} -c listen_addresses=0.0.0.0`,
     "-w",
     "start",
   ]);
