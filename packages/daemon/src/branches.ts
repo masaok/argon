@@ -81,6 +81,13 @@ export async function createBranch(req: CreateBranchRequest): Promise<BranchInfo
   const locator = storage.branchLocator(name);
   const snap = await storage.cloneFrom(parent.dataset, `argon-${id}`, locator);
 
+  // Cloning a *running* parent captures its live postmaster.pid. The snapshot
+  // is crash-consistent, so Postgres will recover via WAL on boot — but the
+  // stale pid file names the parent's still-alive PID (same container), which
+  // makes pg_ctl refuse to start. A fresh clone is never running, so drop it.
+  const cloneDataDir = pg.pgDataDir(await storage.getMountpoint(locator));
+  rmSync(join(cloneDataDir, "postmaster.pid"), { force: true });
+
   const branch: Branch = {
     id,
     name,
@@ -107,8 +114,10 @@ export async function startBranch(id: string): Promise<Branch> {
   const mountpoint = await getBackend().getMountpoint(branch.dataset);
   const dataDir = pg.pgDataDir(mountpoint);
 
-  // A fresh clone carries the parent's postmaster.pid; remove it if that
-  // cluster isn't actually running here, or Postgres may refuse to boot.
+  // Clear a stale postmaster.pid left by a previous run of THIS branch that
+  // didn't shut down cleanly (e.g. the daemon/container was killed), unless a
+  // cluster is genuinely still alive here. Clone-time pids are handled in
+  // createBranch.
   const pidFile = join(dataDir, "postmaster.pid");
   if (existsSync(pidFile) && !(await pg.isAlive(dataDir))) {
     rmSync(pidFile, { force: true });
