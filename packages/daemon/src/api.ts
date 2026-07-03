@@ -18,8 +18,9 @@ export async function startApi(): Promise<void> {
 
   app.setErrorHandler((err, _req, reply) => {
     const status = err instanceof BranchError ? err.statusCode : 500;
+    const message = err instanceof Error ? err.message : "Internal server error";
     if (status >= 500) console.error("[api]", err);
-    void reply.status(status).send({ error: err.message });
+    void reply.status(status).send({ error: message });
   });
 
   app.get("/health", async (): Promise<DaemonHealth> => {
