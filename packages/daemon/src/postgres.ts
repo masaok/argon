@@ -26,11 +26,20 @@ export async function initCluster(dataDir: string): Promise<void> {
     "--no-instructions",
   ]);
   // Branches listen on 0.0.0.0 so the published container ports are reachable
-  // from the host; extend trust past the default loopback-only rules to cover
-  // connections arriving via Docker's gateway. Clones inherit this pg_hba.conf.
+  // from the host; connections arrive via Docker's gateway (an RFC1918 IP),
+  // which the default loopback-only rules reject. Trust only the private Docker
+  // ranges — not the public internet or IPv6 — and rely on binding the host
+  // side of the published ports to 127.0.0.1 for real containment. This is a
+  // single-user local dev tool; do not expose these ports to an untrusted
+  // network. Clones inherit this pg_hba.conf.
   appendFileSync(
     join(dataDir, "pg_hba.conf"),
-    "host all all 0.0.0.0/0 trust\nhost all all ::0/0 trust\n",
+    [
+      "host all all 10.0.0.0/8 trust",
+      "host all all 172.16.0.0/12 trust",
+      "host all all 192.168.0.0/16 trust",
+      "",
+    ].join("\n"),
   );
 }
 
