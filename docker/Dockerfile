@@ -1,15 +1,14 @@
-# Argon all-in-one image: Postgres 17 + ZFS/Btrfs userland + argond + Next.js UI.
-# Requires `privileged: true`. Uses ZFS if the host kernel has the module,
-# otherwise falls back to a file-backed Btrfs volume (works on stock
-# WSL2 / Docker Desktop).
+# Argon all-in-one image: Postgres 17 + Btrfs userland + argond + Next.js UI.
+# Requires `privileged: true`. Uses a file-backed Btrfs volume for branch
+# storage (works on stock WSL2 / Docker Desktop).
 
 FROM node:22-bookworm
 
-# Postgres 17 (pgdg) + ZFS userland tools
+# Postgres 17 (pgdg) + Btrfs userland tools.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends postgresql-common ca-certificates \
   && /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y \
-  && apt-get install -y --no-install-recommends postgresql-17 zfsutils-linux btrfs-progs \
+  && apt-get install -y --no-install-recommends postgresql-17 btrfs-progs \
   && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable
